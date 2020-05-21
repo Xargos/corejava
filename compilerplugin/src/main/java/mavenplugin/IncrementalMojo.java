@@ -1,7 +1,6 @@
 package mavenplugin;
 
 import mavenplugin.io.IOFunctions;
-import mavenplugin.time.TimeDiff;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
@@ -12,11 +11,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -27,7 +22,7 @@ import static java.util.Optional.ofNullable;
 @Mojo(name = "inc", defaultPhase = LifecyclePhase.PRE_CLEAN)
 public class IncrementalMojo extends AbstractMojo {
 
-    private static final String TIMESTAMP_FILE = "buildcheck.timestamp";
+    public static int test = 0;
     private static final List<String> sourceComponents = Arrays.asList("java", "scala", "resources");
 
     @Parameter(defaultValue = "${project}", readonly = true, required = true)
@@ -39,8 +34,11 @@ public class IncrementalMojo extends AbstractMojo {
     @Parameter(defaultValue = "${project.build.outputDirectory}", readonly = true, required = true)
     private File outputDirectory;
 
+    private Optional<File> timestampFile = Optional.empty();
+
     public void execute() {
 
+        test = 1;
         long start = System.currentTimeMillis();
         checkForModification();
         long total = System.currentTimeMillis() - start;
@@ -48,28 +46,39 @@ public class IncrementalMojo extends AbstractMojo {
     }
 
     private void checkForModification() {
-        LocalDateTime codeCompileAt = classCompileTime(outputDirectory);
-        LocalDateTime codeChangedAt = codeChangeTime(compileSourceRoots);
+        Optional<Meta> codeCompileAt = classCompileTime(project.getBasedir());
+        Meta codeChangedAt = codeChangeTime(compileSourceRoots);
 
-        info("Code compiled at %s", codeCompileAt);
+        if (codeCompileAt.isPresent()) {
+            info("Code compiled at %s", codeCompileAt.get());
+        } else {
+            info("Code never compiled");
+        }
         info("Code changed at %s", codeChangedAt);
 
-        if (codeChangedAt.isAfter(codeCompileAt)) {
-            prepareForCompilation(outputDirectory, codeChangedAt, codeCompileAt);
+        if (!codeCompileAt.isPresent() || codeChangedAt.compareTo(codeCompileAt.get()) != 0) {
+            prepareForCompilation(outputDirectory, codeChangedAt);
         } else {
-            nothingToClean(codeChangedAt);
+            nothingToClean();
         }
     }
 
-    private void prepareForCompilation(File targetLocation, LocalDateTime codeChangedAt, LocalDateTime codeCompileAt) {
+    private void prepareForCompilation(File targetLocation, Meta codeChangedAt) {
 
-        info("Code was changed %s after compilation", TimeDiff.diffAsString(codeCompileAt, codeChangedAt));
         Path rootTarget = targetLocation.getParentFile().toPath();
         info("Changed detected - cleaning %s", rootTarget);
 
         cleanTargetLocation(rootTarget);
-        createTimeStampFile(rootTarget);
 
+        storeTimestamp(codeChangedAt);
+    }
+
+    private void storeTimestamp(Meta codeChangedAt) {
+        this.timestampFile.ifPresent(file -> {
+            info("delete: %s", file);
+            file.delete();
+        });
+        TimestampFileService.storeTimestamp(codeChangedAt.getHash());
     }
 
     private void cleanTargetLocation(Path rootTarget) {
@@ -78,19 +87,13 @@ public class IncrementalMojo extends AbstractMojo {
                 .forEach(IOFunctions::deleteFiles);
     }
 
-    private void createTimeStampFile(Path rootTarget) {
-        rootTarget.toFile().mkdir();
-        Path timeStampFile = new File(rootTarget.toFile(), TIMESTAMP_FILE).toPath();
-        IOFunctions.touch(timeStampFile);
-    }
-
-    private void nothingToClean(LocalDateTime codeChangedAt) {
-        String s = TimeDiff.diffAsString(codeChangedAt, LocalDateTime.now());
-        info("Nothing to clean - Source and target are up to date. Not updated from %s", s);
+    private void nothingToClean() {
+        info("Nothing to clean.");
         project.getProperties().setProperty("skipTests", "true");
+        project.getProperties().setProperty("maven.main.skip", "true");
     }
 
-    private LocalDateTime codeChangeTime(List<String> compileSourceRoots) {
+    private Meta codeChangeTime(List<String> compileSourceRoots) {
 
         Stream<File> javaSourceLocation = compileSourceRoots.stream()
                 .filter(this::isJavaLocation)
@@ -140,46 +143,41 @@ public class IncrementalMojo extends AbstractMojo {
                 .map(component -> new File(parentLocation, component));
     }
 
-    private LocalDateTime classCompileTime(File targetLocation) {
-        File[] matchedFile = targetLocation.getParentFile().listFiles(this::isTimeStampFile);
+    private Optional<Meta> classCompileTime(File rootPath) {
+        File[] matchedFile = rootPath.listFiles(TimestampFileService::isTimeStampFile);
         Optional<File[]> timeStampFile = ofNullable(matchedFile);
 
         return timeStampFile
                 .filter(this::hasFile)
                 .map(Arrays::asList)
-                .map(this::mostRecentUpdateTime)
-                .orElse(LocalDateTime.MIN)
-                ;
+                .map(this::getTimestampMeta);
+    }
+
+    private Meta getTimestampMeta(List<File> files) {
+        this.timestampFile = Optional.of(files.get(0));
+        return new Meta(Integer.parseInt(timestampFile.get().getName().split("\\.")[2]));
     }
 
     private boolean hasFile(File[] x) {
         return x.length > 0;
     }
 
-    private LocalDateTime mostRecentUpdateTime(List<File> files) {
+    private Meta mostRecentUpdateTime(List<File> files) {
         Stream<File> filesToCheck = files.stream()
                 .peek(file -> info("Checking %s", file))
                 .filter(File::exists);
 
-        Stream<File> fileUpdateTimes = filesToCheck
+        List<Long> accessibleFiles = filesToCheck
                 .flatMap(IOFunctions::walkFile)
-                .map(Path::toFile);
+                .map(Path::toFile)
+                .map(File::lastModified)
+                .collect(Collectors.toList());
 
-        Optional<File> mostRecentTime = fileUpdateTimes.max(Comparator.comparingLong(File::lastModified));
-        mostRecentTime.ifPresent(f -> info("Last changed file/folder is %s", f));
+        if (accessibleFiles.isEmpty()) {
+            return Meta.empty();
+        }
 
-        return mostRecentTime.map(File::lastModified)
-                .map(this::toLocalDate)
-                .orElse(LocalDateTime.MIN);
-    }
-
-    private LocalDateTime toLocalDate(long value) {
-        Instant epochValue = Instant.ofEpochMilli(value);
-        return LocalDateTime.ofInstant(epochValue, ZoneId.systemDefault());
-    }
-
-    private boolean isTimeStampFile(File file) {
-        return file.getName().equalsIgnoreCase(TIMESTAMP_FILE);
+        return new Meta(accessibleFiles.hashCode());
     }
 
     private void info(String template, Object... args) {
