@@ -1,8 +1,8 @@
 package mavenplugin;
 
-import java.util.Comparator;
+import java.util.Objects;
 
-public class Meta implements Comparable<Meta> {
+public class Meta {
     private static final Meta EMPTY = new Meta(0);
     private final int hash;
 
@@ -19,9 +19,16 @@ public class Meta implements Comparable<Meta> {
     }
 
     @Override
-    public int compareTo(Meta o) {
-        return Comparator.comparingInt(Meta::getHash)
-                .compare(o, this);
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Meta meta = (Meta) o;
+        return hash == meta.hash;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(hash);
     }
 
     @Override

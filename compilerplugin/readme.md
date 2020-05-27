@@ -16,7 +16,7 @@ sandbox code available @ https://github.com/ashkrit/corejava/tree/master/compile
 
 ### Add entry in pom file
 ```
-<plugin>
+            <plugin>
                 <groupId>mavenplugin</groupId>
                 <artifactId>compilerplugin</artifactId>
                 <version>1.0-SNAPSHOT</version>
@@ -26,6 +26,13 @@ sandbox code available @ https://github.com/ashkrit/corejava/tree/master/compile
                         <phase>pre-clean</phase>
                         <goals>
                             <goal>inc</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>post-clean</id>
+                        <phase>install</phase>
+                        <goals>
+                            <goal>post-inc</goal>
                         </goals>
                     </execution>
                 </executions>

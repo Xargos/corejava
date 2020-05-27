@@ -61,6 +61,13 @@
                             <goal>inc</goal>
                         </goals>
                     </execution>
+                    <execution>
+                        <id>post-clean</id>
+                        <phase>install</phase>
+                        <goals>
+                            <goal>post-inc</goal>
+                        </goals>
+                    </execution>
                 </executions>
             </plugin>
 

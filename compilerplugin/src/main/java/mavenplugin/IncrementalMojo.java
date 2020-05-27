@@ -22,7 +22,6 @@ import static java.util.Optional.ofNullable;
 @Mojo(name = "inc", defaultPhase = LifecyclePhase.PRE_CLEAN)
 public class IncrementalMojo extends AbstractMojo {
 
-    public static int test = 0;
     private static final List<String> sourceComponents = Arrays.asList("java", "scala", "resources");
 
     @Parameter(defaultValue = "${project}", readonly = true, required = true)
@@ -34,11 +33,10 @@ public class IncrementalMojo extends AbstractMojo {
     @Parameter(defaultValue = "${project.build.outputDirectory}", readonly = true, required = true)
     private File outputDirectory;
 
-    private Optional<File> timestampFile = Optional.empty();
+    private final TimestampFileService timestampFileService = TimestampFileService.instance(getLog());
 
     public void execute() {
 
-        test = 1;
         long start = System.currentTimeMillis();
         checkForModification();
         long total = System.currentTimeMillis() - start;
@@ -56,7 +54,9 @@ public class IncrementalMojo extends AbstractMojo {
         }
         info("Code changed at %s", codeChangedAt);
 
-        if (!codeCompileAt.isPresent() || codeChangedAt.compareTo(codeCompileAt.get()) != 0) {
+        if (!codeCompileAt.isPresent()
+                || !codeChangedAt.equals(codeCompileAt.get())
+                || !outputDirectory.exists()) {
             prepareForCompilation(outputDirectory, codeChangedAt);
         } else {
             nothingToClean();
@@ -70,15 +70,7 @@ public class IncrementalMojo extends AbstractMojo {
 
         cleanTargetLocation(rootTarget);
 
-        storeTimestamp(codeChangedAt);
-    }
-
-    private void storeTimestamp(Meta codeChangedAt) {
-        this.timestampFile.ifPresent(file -> {
-            info("delete: %s", file);
-            file.delete();
-        });
-        TimestampFileService.storeTimestamp(codeChangedAt.getHash());
+        timestampFileService.storeTimestamp(project.getName(), codeChangedAt.getHash());
     }
 
     private void cleanTargetLocation(Path rootTarget) {
@@ -144,18 +136,14 @@ public class IncrementalMojo extends AbstractMojo {
     }
 
     private Optional<Meta> classCompileTime(File rootPath) {
-        File[] matchedFile = rootPath.listFiles(TimestampFileService::isTimeStampFile);
+        File[] matchedFile = rootPath.listFiles(timestampFileService::isTimeStampFile);
         Optional<File[]> timeStampFile = ofNullable(matchedFile);
 
         return timeStampFile
                 .filter(this::hasFile)
                 .map(Arrays::asList)
-                .map(this::getTimestampMeta);
-    }
-
-    private Meta getTimestampMeta(List<File> files) {
-        this.timestampFile = Optional.of(files.get(0));
-        return new Meta(Integer.parseInt(timestampFile.get().getName().split("\\.")[2]));
+                .map(files -> files.get(0))
+                .map(file -> timestampFileService.getTimestampMeta(project.getName(), file));
     }
 
     private boolean hasFile(File[] x) {

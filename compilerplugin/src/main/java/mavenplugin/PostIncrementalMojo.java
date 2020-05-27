@@ -6,10 +6,7 @@ import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.project.MavenProject;
 
-import java.io.File;
 import java.util.List;
-
-import static mavenplugin.TimestampFileService.createTimeStampFile;
 
 @Mojo(name = "post-inc", defaultPhase = LifecyclePhase.INSTALL)
 public class PostIncrementalMojo extends AbstractMojo {
@@ -20,9 +17,11 @@ public class PostIncrementalMojo extends AbstractMojo {
     @Parameter(defaultValue = "${project.compileSourceRoots}", readonly = true, required = true)
     private List<String> compileSourceRoots;
 
+    private final TimestampFileService timestampFileService = TimestampFileService.instance(getLog());
+
     public void execute() {
         long start = System.currentTimeMillis();
-        createTimeStampFile(project.getBasedir().toPath());
+        timestampFileService.createTimeStampFile(project.getName(), project.getBasedir().toPath());
         long total = System.currentTimeMillis() - start;
         info(String.format("Total time %s ms", total));
     }
