@@ -8,7 +8,7 @@ import org.apache.maven.project.MavenProject;
 
 import java.util.List;
 
-@Mojo(name = "post-inc", defaultPhase = LifecyclePhase.INSTALL)
+@Mojo(name = "post-inc", defaultPhase = LifecyclePhase.INSTALL, threadSafe = true)
 public class PostIncrementalMojo extends AbstractMojo {
 
     @Parameter(defaultValue = "${project}", readonly = true, required = true)
